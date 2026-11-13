@@ -9,7 +9,7 @@ A [Pi Coding Agent](https://pi.dev/) extension that displays real-time **tokens-
 - **Configurable sliding window** — adjust the window size to suit your server speed (default: 1s)
 - **Color-coded speed indicators** — visual feedback based on performance thresholds
 - **Configurable update interval** — throttle status bar updates to reduce visual flickering
-- **Rolling average & max** — a live rolling average of the active prompt's TPS, plus the session's best response per model
+- **Rolling average & max** — a live rolling average of the active prompt's TPS, plus the session's highest live TPS per model
 - **Provider-reported counting** — opt in to using provider-reported counts (e.g. Anthropic, OpenAI) instead of the extension's own counter
 - **Per-provider overrides** — different thresholds, display mode, etc. per provider (e.g. `anthropic` vs `openai`)
 - **Fully configurable** — customize display, thresholds and colors via `~/.pi/agent/settings.json`
@@ -144,7 +144,7 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 | `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                                                |
 | `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))       |
 | `rollingAverage`     | number                         | `10`        | Live samples averaged, `0` = off (see [Rolling Average & Max](#rolling-average--max))             |
-| `showMax`            | boolean                        | `true`      | Show the session's best response (see [Rolling Average & Max](#rolling-average--max))             |
+| `showMax`            | boolean                        | `true`      | Show the session's highest live TPS (see [Rolling Average & Max](#rolling-average--max))          |
 | `displayColors`      | object                         | `{}`        | Hex colors for the suffix parts (see [Display Color Customization](#display-color-customization)) |
 | `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))                     |
 
@@ -161,7 +161,7 @@ A small interactive menu is available when running `/tps` in the editor, where y
 - **End-of-stream TPS** — what to show after streaming ends (`average` or `last`)
 - **Format duration** — show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))
 - **Rolling average** — how many live samples to average, or off (see [Rolling Average & Max](#rolling-average--max))
-- **Show max TPS** — show the session's best response (see [Rolling Average & Max](#rolling-average--max))
+- **Show max TPS** — show the session's highest live TPS (see [Rolling Average & Max](#rolling-average--max))
 - **Thresholds** — customize the TPS threshold values for each tier (see [Threshold Customization](#threshold-customization))
 - **Colors** — customize the hex color for each TPS tier (see [Color Customization](#color-customization))
 - **Display colors** — customize the hex color for the suffix parts (count, elapsed, ttft) (see [Display Color Customization](#display-color-customization))
@@ -241,21 +241,21 @@ This is also configurable via the `/tps` interactive menu.
 
 ### Rolling Average & Max
 
-Besides the instantaneous reading, the status bar shows a smoothed live average and the session's best:
+Besides the instantaneous reading, the status bar shows a smoothed live average and the session's peak. Both are on by default:
 
 ```
 ⚡ TPS: 41.2 tok/s · avg: 38.7 · max: 45.0
 ```
 
 - **`avg`** — a rolling average of the active prompt. Every 300 ms while the prompt streams, the current sliding-window TPS is sampled; `avg` is the mean of the last `rollingAverage` samples (default 10 samples = 3 s). It updates in real time, including during stalls when no tokens arrive, and stays on screen after the response ends until the next prompt starts.
-- **`max`** — the best response of the session: the highest overall average TPS (total tokens / elapsed time) of any completed agent run, regardless of `endTpsBehavior`. It is tracked per model (`provider/model`), so switching models never mixes their speeds, and is reset when a new session starts.
+- **`max`** — the highest live TPS sampled this session: every 300 ms sample that feeds `avg` also updates `max`, so it rises in real time while a prompt streams and is never below `avg`. It is tracked per model (`provider/model`), so switching models never mixes their speeds, and is reset when a new session starts.
 
-Sampling pauses during tool execution and before the prompt's first token, so idle time never counts as 0 tok/s. Both values are colored by speed tier, using the same thresholds and colors as the live reading.
+Sampling pauses during tool execution and before the prompt's first token, so idle time never counts as 0 tok/s. Both values are colored by speed tier, using the same thresholds and colors as the live reading. Until there is a value they show as `--` (e.g. `TPS: -- · avg: -- · max: --` at session start), so the layout never shifts.
 
 | Option           | Values    | Default | Behavior                                                 |
 | ---------------- | --------- | ------- | -------------------------------------------------------- |
 | `rollingAverage` | `0`–`100` | `10`    | Number of 300 ms samples averaged; `0` hides the average |
-| `showMax`        | boolean   | `true`  | Show the best response of the session                    |
+| `showMax`        | boolean   | `true`  | Show the session's highest live TPS                      |
 
 The `/tps` menu offers `Off` and 5, 10, 20, 50 or 100 samples (1.5 s to 30 s); any whole number up to `100` can be set in `~/.pi/agent/settings.json`:
 
@@ -424,15 +424,15 @@ The settings menu is described in detail in [Interactive Menu](#interactive-menu
 
 ## How It Works
 
-1. **Session Start** — Renders the initial status bar entry showing the configured icon followed by `TPS: --`, and clears the session max
+1. **Session Start** — Renders the initial status bar entry showing the configured icon followed by `TPS: -- · avg: -- · max: --`, and clears the rolling average and session max
 2. **Message Start** — When a user message starts, TTFT measurement begins
 3. **First Token & Streaming Start** — The moment the first content block starts (`text_start`, `thinking_start`, or `toolcall_start`), the TTFT is recorded and the streaming engine starts tracking
 4. **Token Update** — Each text, thinking, and tool-call delta is recorded. If `useProviderTokens` is `true` and the provider reports token counts, those are used directly; otherwise the extension's own counter (controlled by `countStrategy`) is used
 5. **Sliding Window** — TPS is calculated using a configurable time window of token timestamps. If all events in the window share the same timestamp (a flush after a stall), the span extends backward to include the gap. When streaming ends, behavior depends on `endTpsBehavior`:
    - `average` (default): returns the overall average TPS for consistency with stats.
    - `last`: returns the last sliding window measurement.
-6. **Rolling Average** — While the prompt streams, the sliding-window TPS is sampled every 300 ms (except during tool execution) for the live [rolling average](#rolling-average--max)
-7. **Agent End** — The authoritative token count (if available) is used to snap the total, ensuring the final average is exact. Sampling and streaming are stopped, and the run's overall average TPS is recorded for the current model's [session max](#rolling-average--max).
+6. **Rolling Average & Max** — While the prompt streams, the sliding-window TPS is sampled every 300 ms (except during tool execution); each sample feeds the live [rolling average and the session max](#rolling-average--max)
+7. **Agent End** — The authoritative token count (if available) is used to snap the total, ensuring the final average is exact. Sampling and streaming are stopped.
 
 ## Dependencies
 

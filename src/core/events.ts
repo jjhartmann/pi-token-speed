@@ -14,7 +14,7 @@ import {
   ToolcallDeltaHandler,
   ToolcallEndHandler,
 } from "./message-handlers";
-import { modelKey, TpsHistory } from "./tps-history";
+import { TpsHistory } from "./tps-history";
 
 /**
  * Manages all Pi event subscriptions for the token-speed extension.
@@ -36,7 +36,7 @@ export class EventManager {
     this.registry.register(new DeltaHandler(engine, renderer));
     this.registry.register(new ToolcallDeltaHandler(engine, renderer));
     this.registry.register(new ToolcallEndHandler(engine));
-    this.sampler = new LiveSampler(engine, renderer);
+    this.sampler = new LiveSampler(engine, renderer, history);
   }
 
   /**
@@ -97,18 +97,13 @@ export class EventManager {
 
   /**
    * Stops sampling, reconciles the total token count, stops streaming,
-   * records the run's average TPS for the session max, and updates the
-   * renderer.
+   * and updates the renderer.
    *
    * @param event The message_end event payload.
    * @param ctx The Pi extension context.
    */
   handleAgentEnd(event: AgentEndEvent, ctx: ExtensionContext): void {
     this.sampler.stop();
-
-    // A run that never started streaming (e.g. a request error) carries
-    // the previous run's counters, so it must not produce a sample.
-    const streamed = this.engine.isStreaming;
     this.engine.stop();
 
     // Only assistant and toolResult messages carry usage data
@@ -123,9 +118,6 @@ export class EventManager {
     }, 0);
 
     this.engine.reconcileTotal(outputTokens);
-    if (streamed) {
-      this.history.record(modelKey(ctx.model), this.engine.tpsAvg);
-    }
     // Bypass the throttle so the final values are always shown
     this.renderer.update(ctx, true);
   }

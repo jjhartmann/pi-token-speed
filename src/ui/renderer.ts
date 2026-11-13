@@ -100,14 +100,16 @@ export class Renderer {
 
   /**
    * Builds the suffix with the live rolling average of the active prompt
-   * and the session's best response, each colored by its TPS tier.
+   * and the session's highest live TPS, each colored by its TPS tier.
+   * Enabled parts are always shown (as `--` until there is a value) so
+   * the layout stays stable.
    *
    * Example: ` · avg: 38.7 · max: 45.0`
    *
    * @param config The resolved configuration.
    * @param theme The active theme (labels are dimmed like "TPS:").
    * @param key The current model's history key (for the max).
-   * @returns The suffix, or "" when disabled or nothing to show yet.
+   * @returns The suffix, or "" when both parts are disabled.
    */
   private buildAverageMaxSuffix(
     config: TokenSpeedConfig,
@@ -115,17 +117,22 @@ export class Renderer {
     key: string,
   ): string {
     const parts: string[] = [];
-    const formatPart = (label: string, tps: number) =>
-      `${theme.fg("dim", label)} ${truecolor(
-        tps.toFixed(1),
-        this.getColor(config, tps),
-      )}`;
+    const formatPart = (label: string, tps: number | undefined) => {
+      const value =
+        tps === undefined
+          ? "--"
+          : truecolor(tps.toFixed(1), this.getColor(config, tps));
+      return `${theme.fg("dim", label)} ${value}`;
+    };
 
-    const avg = this.engine.rollingAverage(config.rollingAverage);
-    if (avg !== undefined) parts.push(formatPart("avg:", avg));
+    if (config.rollingAverage > 0) {
+      const avg = this.engine.rollingAverage(config.rollingAverage);
+      parts.push(formatPart("avg:", avg));
+    }
 
-    const max = config.showMax ? this.history.max(key) : undefined;
-    if (max !== undefined) parts.push(formatPart("max:", max));
+    if (config.showMax) {
+      parts.push(formatPart("max:", this.history.max(key)));
+    }
 
     if (parts.length === 0) return "";
     return ` · ${parts.join(" · ")}\u200b`;
@@ -263,7 +270,8 @@ export class Renderer {
   }
 
   /**
-   * Renders the first-run placeholder in the status bar.
+   * Renders the first-run placeholder in the status bar, including the
+   * avg / max fields when enabled.
    *
    * @param ctx The context used by Pi.
    */
@@ -272,7 +280,12 @@ export class Renderer {
     const config = this.settings.resolveConfig(ctx.model?.provider);
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
-    const text = `${prefix} --`;
+    const averageMax = this.buildAverageMaxSuffix(
+      config,
+      theme,
+      modelKey(ctx.model),
+    );
+    const text = `${prefix} --${averageMax}`;
     ctx.ui.setStatus(STATUS_KEY, text);
   }
 

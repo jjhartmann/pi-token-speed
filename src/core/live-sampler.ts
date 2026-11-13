@@ -2,11 +2,13 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ROLLING_AVERAGE_SAMPLE_MS } from "../config/constants";
 import type { Renderer } from "../ui/renderer";
 import type { TokenSpeedEngine } from "./engine";
+import { modelKey, type TpsHistory } from "./tps-history";
 
 /**
- * Samples the live TPS on a fixed interval while a prompt is active and
- * re-renders, so the rolling average updates in real time — including
- * during stalls, when no deltas arrive to trigger a render.
+ * Samples the live TPS on a fixed interval while a prompt is active,
+ * feeds each sample to the session max, and re-renders, so the rolling
+ * average and max update in real time — including during stalls, when
+ * no deltas arrive to trigger a render.
  */
 export class LiveSampler {
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -14,6 +16,7 @@ export class LiveSampler {
   constructor(
     private readonly engine: TokenSpeedEngine,
     private readonly renderer: Renderer,
+    private readonly history: TpsHistory,
     private readonly intervalMs = ROLLING_AVERAGE_SAMPLE_MS,
   ) {}
 
@@ -45,10 +48,14 @@ export class LiveSampler {
   }
 
   /**
-   * Takes one sample and re-renders when a sample was taken (nothing
-   * changes while paused for a tool call or waiting for the first token).
+   * Takes one sample, records it for the current model's session max, and
+   * re-renders. Does nothing while paused for a tool call or waiting for
+   * the first token.
    */
   private tick(ctx: ExtensionContext): void {
-    if (this.engine.sample()) this.renderer.update(ctx);
+    const tps = this.engine.sample();
+    if (tps === undefined) return;
+    this.history.record(modelKey(ctx.model), tps);
+    this.renderer.update(ctx);
   }
 }
