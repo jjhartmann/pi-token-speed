@@ -35,6 +35,8 @@ const settingsState = vi.hoisted(() => {
     icon: "⚡",
     updateInterval: 0,
     formatDuration: false,
+    rollingAverage: 10,
+    showMax: true,
     thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
     colors: {
       slow: "#ffcc00",

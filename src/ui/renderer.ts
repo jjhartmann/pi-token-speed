@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { STATUS_KEY } from "../config/constants";
 import type {
   DisplayColors,
@@ -6,6 +6,7 @@ import type {
   TokenSpeedConfig,
 } from "../config/types";
 import { TokenSpeedEngine } from "../core/engine";
+import { modelKey, TpsHistory } from "../core/tps-history";
 import { type DisplayMode } from "../settings/items/display";
 import { truecolor } from "./ansi";
 
@@ -26,11 +27,13 @@ export class Renderer {
   private lastUpdateTime = 0;
 
   /**
-   * Creates a new Renderer bound to an engine and settings provider.
+   * Creates a new Renderer bound to an engine, settings provider, and
+   * per-response TPS history.
    */
   constructor(
     private readonly engine: TokenSpeedEngine,
     private readonly settings: SettingsProvider,
+    private readonly history: TpsHistory,
   ) {}
 
   /**
@@ -38,13 +41,15 @@ export class Renderer {
    * If updateInterval is undefined, updates happen immediately (current behavior).
    *
    * @param ctx The context used by Pi.
+   * @param force Render even if the throttle interval has not elapsed
+   *   (used for the final update at the end of a run).
    */
-  update(ctx: ExtensionContext): void {
+  update(ctx: ExtensionContext, force = false): void {
     const config = this.settings.getConfig();
     const interval = config.updateInterval;
 
-    // If no interval set, update immediately (current behavior)
-    if (!interval) {
+    // If no interval set (or forced), update immediately
+    if (!interval || force) {
       this.render(ctx);
       return;
     }
@@ -79,11 +84,51 @@ export class Renderer {
       displayColors: config.displayColors,
     });
 
+    // Append the session history (rolling average / max)
+    const history = this.buildHistorySuffix(
+      config,
+      theme,
+      modelKey(ctx.model),
+    );
+
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
-    const text = `${prefix} ${displayValue}${suffix}`;
+    const text = `${prefix} ${displayValue}${suffix}${history}`;
 
     ctx.ui.setStatus(STATUS_KEY, text);
+  }
+
+  /**
+   * Builds the session-history suffix: rolling average of recent
+   * responses and best response, each colored by its TPS tier.
+   *
+   * Example: ` · avg(10): 38.7 · max: 45.0`
+   *
+   * @param config The resolved configuration.
+   * @param theme The active theme (labels are dimmed like "TPS:").
+   * @param key The current model's history key.
+   * @returns The suffix, or "" when disabled or nothing is recorded yet.
+   */
+  private buildHistorySuffix(
+    config: TokenSpeedConfig,
+    theme: Theme,
+    key: string,
+  ): string {
+    const parts: string[] = [];
+    const formatPart = (label: string, tps: number) =>
+      `${theme.fg("dim", label)} ${truecolor(
+        tps.toFixed(1),
+        this.getColor(config, tps),
+      )}`;
+
+    const avg = this.history.average(key, config.rollingAverage);
+    if (avg) parts.push(formatPart(`avg(${avg.count}):`, avg.value));
+
+    const max = config.showMax ? this.history.max(key) : undefined;
+    if (max !== undefined) parts.push(formatPart("max:", max));
+
+    if (parts.length === 0) return "";
+    return ` · ${parts.join(" · ")}​`;
   }
 
   /**

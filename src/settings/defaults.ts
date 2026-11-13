@@ -8,6 +8,8 @@ import { DisplayColorsGroupSettingsItem } from "./items/display-colors/group";
 import { EndTpsBehaviorSettingsItem } from "./items/end-tps-behavior";
 import { FormatDurationSettingsItem } from "./items/format-duration";
 import { IconSettingsItem } from "./items/icon";
+import { RollingAverageSettingsItem } from "./items/rolling-average";
+import { ShowMaxSettingsItem } from "./items/show-max";
 import { SlidingWindowSettingsItem } from "./items/sliding-window";
 import { THRESHOLD_ITEMS } from "./items/thresholds";
 import { ThresholdsGroupSettingsItem } from "./items/thresholds/group";
@@ -26,6 +28,8 @@ export const SETTINGS_ITEMS: Record<string, SettingsItem> = {
   slidingWindow: new SlidingWindowSettingsItem(),
   endTpsBehavior: new EndTpsBehaviorSettingsItem(),
   formatDuration: new FormatDurationSettingsItem(),
+  rollingAverage: new RollingAverageSettingsItem(),
+  showMax: new ShowMaxSettingsItem(),
   thresholds: new ThresholdsGroupSettingsItem(),
   colors: new ColorsGroupSettingsItem(),
   displayColors: new DisplayColorsGroupSettingsItem(),

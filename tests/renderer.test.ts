@@ -4,6 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { STATUS_KEY } from "../src/config/constants";
 import type { TokenSpeedConfig } from "../src/config/types";
 import { TokenSpeedEngine } from "../src/core/engine";
+import { TpsHistory } from "../src/core/tps-history";
 import { Renderer } from "../src/ui/renderer";
 
 // Mutable config so tests can override settings mid-flight
@@ -17,6 +18,8 @@ const configRef: { current: TokenSpeedConfig } = {
     icon: "⚡",
     updateInterval: 0,
     formatDuration: false,
+    rollingAverage: 10,
+    showMax: true,
     thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
     colors: {
       slow: "#ffcc00",
@@ -106,6 +109,7 @@ describe("Renderer", () => {
   let engine: TokenSpeedEngine;
   let ctx: ExtensionContext;
   let renderer: Renderer;
+  let history: TpsHistory;
 
   beforeEach(() => {
     // Reset to clean default config (no throttle)
@@ -118,6 +122,8 @@ describe("Renderer", () => {
       icon: "⚡",
       updateInterval: 0,
       formatDuration: false,
+      rollingAverage: 10,
+      showMax: true,
       thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
       colors: {
         slow: "#ffcc00",
@@ -128,9 +134,10 @@ describe("Renderer", () => {
       displayColors: { count: "", elapsed: "", ttft: "" },
       providerOverrides: {},
     };
+    history = new TpsHistory();
     engine = makeEngine();
     ctx = makeContext();
-    renderer = new Renderer(engine, settings as any);
+    renderer = new Renderer(engine, settings as any, history);
   });
 
   // ---- update / throttle ----
@@ -151,7 +158,7 @@ describe("Renderer", () => {
 
     it("throttles subsequent calls within the interval", () => {
       configRef.current = makeConfig({ updateInterval: 500 });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       const renderSpy = vi.spyOn(renderer as any, "render");
 
       renderer.update(ctx);
@@ -186,7 +193,7 @@ describe("Renderer", () => {
     it("uses the configured icon as prefix", () => {
       const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
       configRef.current = makeConfig({ icon: "🚀" });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_tps"] = 10;
 
       (renderer as any).render(ctx);
@@ -200,7 +207,7 @@ describe("Renderer", () => {
     it("omits the icon when disabled", () => {
       const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
       configRef.current = makeConfig({ icon: "" });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_tps"] = 10;
 
       (renderer as any).render(ctx);
@@ -263,7 +270,7 @@ describe("Renderer", () => {
     ])("renders suffix for display mode '%s'", (mode: string) => {
       const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
       configRef.current = makeConfig({ display: mode as any });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_tps"] = 30;
 
       (renderer as any).render(ctx);
@@ -435,6 +442,8 @@ describe("Renderer", () => {
         icon: "⚡",
         updateInterval: 0,
         formatDuration: false,
+        rollingAverage: 10,
+        showMax: true,
         thresholds: { slow: 10, medium: 30, fast: 60, blazing: 100 },
         colors: {
           slow: "#ffcc00",
@@ -445,7 +454,7 @@ describe("Renderer", () => {
         displayColors: { count: "", elapsed: "", ttft: "" },
         providerOverrides: {},
       };
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
     });
 
     it("sets the status bar to a placeholder with TPS: --", () => {
@@ -459,7 +468,7 @@ describe("Renderer", () => {
     it("omits icon when icon is empty", () => {
       const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
       configRef.current = makeConfig({ icon: "" });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
 
       renderer.initialize(ctx);
 
@@ -544,7 +553,7 @@ describe("Renderer", () => {
         display: "stats",
         displayColors: { count: "#00ff88", elapsed: "#ffaa00", ttft: "" },
       });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_tokenCount"] = 200;
       engine["_startTime"] = Date.now() - 5000;
       engine["_endTime"] = Date.now();
@@ -563,7 +572,7 @@ describe("Renderer", () => {
         display: "ttft",
         displayColors: { count: "", elapsed: "", ttft: "#44ddff" },
       });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_ttftEnd"] = 450;
       engine["_ttftStart"] = 0;
 
@@ -584,7 +593,7 @@ describe("Renderer", () => {
           ttft: "#44ddff",
         },
       });
-      renderer = new Renderer(engine, settings as any);
+      renderer = new Renderer(engine, settings as any, history);
       engine["_tokenCount"] = 200;
       engine["_startTime"] = Date.now() - 5000;
       engine["_endTime"] = Date.now();
@@ -599,6 +608,90 @@ describe("Renderer", () => {
       expect(calledWith).toContain("\x1b[38;2;0;255;136m");
       expect(calledWith).toContain("\x1b[38;2;255;170;0m");
       expect(calledWith).toContain("\x1b[38;2;68;221;255m");
+    });
+  });
+
+  // ---- history suffix (rolling average / max) ----
+
+  describe("history suffix", () => {
+    const KEY = "local/qwen";
+
+    beforeEach(() => {
+      ctx = makeContext({ model: { provider: "local", id: "qwen" } as any });
+      engine["_tps"] = 40;
+    });
+
+    const status = (): string => {
+      const spy = vi.spyOn(ctx.ui, "setStatus");
+      (renderer as any).render(ctx);
+      return spy.mock.calls.at(-1)![1] as string;
+    };
+
+    it("is omitted until a response has been recorded", () => {
+      const text = status();
+      expect(text).not.toContain("avg(");
+      expect(text).not.toContain("max:");
+    });
+
+    it("appends the tier-colored average of the last N responses and the max", () => {
+      configRef.current = makeConfig({ rollingAverage: 2 });
+      for (const tps of [100, 10, 20]) history.record(KEY, tps);
+
+      // 40 → medium (#88cc00), 15 → slow (#ffcc00), 100 → blazing (#00ccff)
+      expect(status()).toBe(
+        "⚡ TPS: \x1b[38;2;136;204;0m40.0 tok/s\x1b[0m\u200b" +
+          " · avg(2): \x1b[38;2;255;204;0m15.0\x1b[0m" +
+          " · max: \x1b[38;2;0;204;255m100.0\x1b[0m\u200b",
+      );
+    });
+
+    it("shows the sample count while fewer than N responses exist", () => {
+      history.record(KEY, 30);
+      expect(status()).toContain("avg(1): ");
+    });
+
+    it("comes after the stats suffix", () => {
+      configRef.current = makeConfig({ display: "stats" });
+      engine["_tokenCount"] = 150;
+      history.record(KEY, 30);
+      expect(status()).toMatch(/\(150 tok[^)]*\)\u200b · avg\(1\): /);
+    });
+
+    it("hides the average when rollingAverage is 0", () => {
+      configRef.current = makeConfig({ rollingAverage: 0 });
+      history.record(KEY, 30);
+      const text = status();
+      expect(text).not.toContain("avg(");
+      expect(text).toContain("max: ");
+    });
+
+    it("hides the max when showMax is off", () => {
+      configRef.current = makeConfig({ showMax: false });
+      history.record(KEY, 30);
+      const text = status();
+      expect(text).toContain("avg(1): ");
+      expect(text).not.toContain("max:");
+    });
+
+    it("only uses responses from the current model", () => {
+      history.record("anthropic/claude", 90);
+      expect(status()).not.toContain("avg(");
+    });
+  });
+
+  // ---- forced update ----
+
+  describe("forced update", () => {
+    it("renders despite the throttle when forced", () => {
+      configRef.current = makeConfig({ updateInterval: 500 });
+      const renderSpy = vi.spyOn(renderer as any, "render");
+
+      renderer.update(ctx);
+      renderer.update(ctx);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+
+      renderer.update(ctx, true);
+      expect(renderSpy).toHaveBeenCalledTimes(2);
     });
   });
 });
