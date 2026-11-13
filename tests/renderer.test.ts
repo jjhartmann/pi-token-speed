@@ -457,8 +457,20 @@ describe("Renderer", () => {
       renderer = new Renderer(engine, settings as any, history);
     });
 
-    it("sets the status bar to a placeholder with TPS: --", () => {
+    it("sets the status bar to a placeholder with TPS, avg and max", () => {
       const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+
+      renderer.initialize(ctx);
+
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        "⚡ TPS: -- · avg: -- · max: --\u200b",
+      );
+    });
+
+    it("leaves avg and max out of the placeholder when disabled", () => {
+      const setStatusSpy = vi.spyOn(ctx.ui, "setStatus");
+      configRef.current = makeConfig({ rollingAverage: 0, showMax: false });
 
       renderer.initialize(ctx);
 
@@ -472,7 +484,10 @@ describe("Renderer", () => {
 
       renderer.initialize(ctx);
 
-      expect(setStatusSpy).toHaveBeenCalledWith(STATUS_KEY, "TPS: --");
+      expect(setStatusSpy).toHaveBeenCalledWith(
+        STATUS_KEY,
+        "TPS: -- · avg: -- · max: --\u200b",
+      );
     });
   });
 
@@ -628,10 +643,8 @@ describe("Renderer", () => {
       return spy.mock.calls.at(-1)![1] as string;
     };
 
-    it("is omitted until a sample or response exists", () => {
-      const text = status();
-      expect(text).not.toContain("avg:");
-      expect(text).not.toContain("max:");
+    it("shows placeholders until there is a value", () => {
+      expect(status()).toContain(" · avg: -- · max: --\u200b");
     });
 
     it("appends the tier-colored average of the last N live samples and the max", () => {
@@ -679,9 +692,16 @@ describe("Renderer", () => {
       expect(text).not.toContain("max:");
     });
 
+    it("omits the suffix when both are disabled", () => {
+      configRef.current = makeConfig({ rollingAverage: 0, showMax: false });
+      expect(status()).toBe(
+        "⚡ TPS: [38;2;136;204;0m40.0 tok/s[0m\u200b",
+      );
+    });
+
     it("only shows the max of the current model", () => {
       history.record("anthropic/claude", 90);
-      expect(status()).not.toContain("max:");
+      expect(status()).toContain("max: --");
     });
   });
 

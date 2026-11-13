@@ -9,20 +9,22 @@ export const modelKey = (
 ): string => `${model?.provider ?? ""}/${model?.id ?? ""}`;
 
 /**
- * Session-scoped record of the best per-response tokens-per-second.
+ * Session-scoped record of the highest live tokens-per-second per model.
  *
- * Each completed agent run reports its overall average TPS. Results are
- * bucketed per model so switching models never mixes their speeds.
+ * Fed with every live TPS sample (the same readings the rolling average
+ * uses), so the max updates while a prompt streams and is never below
+ * the average. Bucketed per model so switching models never mixes their
+ * speeds.
  */
 export class TpsHistory {
   private readonly best = new Map<string, number>();
 
   /**
-   * Records one completed response. Non-finite or non-positive values
-   * (e.g. a run that produced no tokens) are ignored.
+   * Records one live TPS sample. Non-finite or non-positive values
+   * (e.g. a stall) are ignored.
    *
    * @param key The model key (see `modelKey`).
-   * @param tps The response's overall average TPS.
+   * @param tps The sampled TPS.
    */
   record(key: string, tps: number): void {
     if (!Number.isFinite(tps) || tps <= 0) return;
@@ -30,10 +32,10 @@ export class TpsHistory {
   }
 
   /**
-   * Highest per-response TPS recorded for a model.
+   * Highest TPS sampled for a model this session.
    *
    * @param key The model key (see `modelKey`).
-   * @returns The max, or undefined when no responses have been recorded.
+   * @returns The max, or undefined when nothing has been sampled yet.
    */
   max(key: string): number | undefined {
     return this.best.get(key);

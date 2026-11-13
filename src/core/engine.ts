@@ -46,11 +46,12 @@ export class TokenSpeedEngine {
   }
 
   /**
-   * Loads configuration.
+   * Loads configuration and clears the previous session's live samples.
    * Must be called after `settings.initialize()`.
    */
   initialize(): void {
     this._providerId = undefined;
+    this._samples.reset();
     this.applyConfig(this.settings.getConfig());
   }
 
@@ -193,14 +194,15 @@ export class TokenSpeedEngine {
    * Skipped when not streaming, while paused (tool execution), and before
    * the first token of the prompt, so idle time never counts as 0 tok/s.
    *
-   * @returns Whether a sample was taken.
+   * @returns The sampled TPS, or undefined when no sample was taken.
    */
-  sample(): boolean {
+  sample(): number | undefined {
     if (!this._isStreaming || this._isPaused || this._tokenCount === 0) {
-      return false;
+      return undefined;
     }
-    this._samples.add(this._slidingWindow.getTps(this.now()));
-    return true;
+    const tps = this._slidingWindow.getTps(this.now());
+    this._samples.add(tps);
+    return tps;
   }
 
   /**

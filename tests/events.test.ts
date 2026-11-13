@@ -58,26 +58,11 @@ describe("EventManager", () => {
   // ── session max ────────────────────────────────────────────────────
 
   describe("session max", () => {
-    it("records the run's overall average TPS for the current model", () => {
+    it("does not record the response average at agent end", () => {
       engine.start();
       engine.mockTime += 2_000;
       manager.handleAgentEnd(agentEnd(100), ctx);
-
-      // 100 reconciled tokens over 2s
-      expect(history.max(KEY)).toBe(50);
-    });
-
-    it("does not record a run that never started streaming", () => {
-      engine.start();
-      engine.mockTime += 2_000;
-      manager.handleAgentEnd(agentEnd(100), ctx);
-
-      // Second agent_end without a new stream (e.g. a request error):
-      // recording it would give 1000 tok / 7s ≈ 143 tok/s
-      engine.mockTime += 5_000;
-      manager.handleAgentEnd(agentEnd(1000), ctx);
-
-      expect(history.max(KEY)).toBe(50);
+      expect(history.max(KEY)).toBeUndefined();
     });
 
     it("forces the final render past the update throttle", () => {
@@ -116,6 +101,7 @@ describe("EventManager", () => {
 
       // 1 token, 500 ms after it arrived
       expect(engine.rollingAverage(10)).toBe(2);
+      expect(history.max(KEY)).toBe(2);
     });
 
     it("stops sampling at agent end and keeps the final average", () => {

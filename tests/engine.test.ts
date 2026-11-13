@@ -327,14 +327,14 @@ describe("TokenSpeedEngine", () => {
 
     it("skips sampling before the first token", () => {
       live.tick(1000);
-      expect(live.sample()).toBe(false);
+      expect(live.sample()).toBeUndefined();
       expect(live.rollingAverage(10)).toBeUndefined();
     });
 
     it("samples the sliding-window TPS at the current time", () => {
       tokens(10);
       live.tick(1000);
-      expect(live.sample()).toBe(true);
+      expect(live.sample()).toBe(10); // returns the sample
       expect(live.rollingAverage(10)).toBe(10); // 10 tok / 1s
 
       // No new tokens: the reading decays as time passes
@@ -348,7 +348,7 @@ describe("TokenSpeedEngine", () => {
       tokens(10);
       live.pause();
       live.tick(1000);
-      expect(live.sample()).toBe(false);
+      expect(live.sample()).toBeUndefined();
       expect(live.rollingAverage(10)).toBeUndefined();
     });
 
@@ -357,8 +357,17 @@ describe("TokenSpeedEngine", () => {
       live.tick(1000);
       live.sample();
       live.stop();
-      expect(live.sample()).toBe(false);
+      expect(live.sample()).toBeUndefined();
       expect(live.rollingAverage(10)).toBe(10);
+    });
+
+    it("clears the samples when a new session initializes", () => {
+      tokens(10);
+      live.tick(1000);
+      live.sample();
+      live.stop();
+      live.initialize();
+      expect(live.rollingAverage(10)).toBeUndefined();
     });
 
     it("clears the samples when the next prompt starts", () => {
