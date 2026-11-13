@@ -13,6 +13,7 @@ import {
   ToolcallDeltaHandler,
   ToolcallEndHandler,
 } from "./message-handlers";
+import { modelKey, TpsHistory } from "./tps-history";
 
 /**
  * Manages all Pi event subscriptions for the token-speed extension.
@@ -24,6 +25,7 @@ export class EventManager {
     private readonly engine: TokenSpeedEngine,
     private readonly renderer: Renderer,
     private readonly settings: SettingsProvider,
+    private readonly history: TpsHistory,
   ) {
     this.registry = new MessageHandlerRegistry();
     this.registry.register(
@@ -50,6 +52,7 @@ export class EventManager {
 
     this.engine.initialize();
     this.engine.applyProvider(ctx.model?.provider);
+    this.history.reset();
     this.renderer.initialize(ctx);
     this.renderer.resetThrottle();
   }
@@ -86,12 +89,16 @@ export class EventManager {
   }
 
   /**
-   * Reconciles the total token count, stops streaming, and updates the renderer.
+   * Reconciles the total token count, stops streaming, records the run's
+   * average TPS in the history, and updates the renderer.
    *
    * @param event The message_end event payload.
    * @param ctx The Pi extension context.
    */
   handleAgentEnd(event: AgentEndEvent, ctx: ExtensionContext): void {
+    // A run that never started streaming (e.g. a request error) carries
+    // the previous run's counters, so it must not produce a sample.
+    const streamed = this.engine.isStreaming;
     this.engine.stop();
 
     // Only assistant and toolResult messages carry usage data
@@ -106,6 +113,10 @@ export class EventManager {
     }, 0);
 
     this.engine.reconcileTotal(outputTokens);
-    this.renderer.update(ctx);
+    if (streamed) {
+      this.history.record(modelKey(ctx.model), this.engine.tpsAvg);
+    }
+    // Bypass the throttle so the final values are always shown
+    this.renderer.update(ctx, true);
   }
 }

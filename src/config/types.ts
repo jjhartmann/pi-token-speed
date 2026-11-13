@@ -51,6 +51,8 @@ interface TokenSpeedConfigFields {
   icon: string;
   updateInterval: number; // ms, 0 = update on every delta
   formatDuration: boolean;
+  rollingAverage: number; // responses averaged, 0 = hidden
+  showMax: boolean;
   thresholds: Thresholds;
   colors: Colors;
   displayColors: DisplayColors;

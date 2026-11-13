@@ -9,6 +9,7 @@ A [Pi Coding Agent](https://pi.dev/) extension that displays real-time **tokens-
 - **Configurable sliding window** — adjust the window size to suit your server speed (default: 1s)
 - **Color-coded speed indicators** — visual feedback based on performance thresholds
 - **Configurable update interval** — throttle status bar updates to reduce visual flickering
+- **Rolling average & max** — average TPS of your last N responses and the session's best, tracked per model
 - **Provider-reported counting** — opt in to using provider-reported counts (e.g. Anthropic, OpenAI) instead of the extension's own counter
 - **Per-provider overrides** — different thresholds, display mode, etc. per provider (e.g. `anthropic` vs `openai`)
 - **Fully configurable** — customize display, thresholds and colors via `~/.pi/agent/settings.json`
@@ -62,7 +63,9 @@ You can customize the display, speed thresholds and colors by adding a `tokenSpe
     "icon": "⚡",
     "slidingWindow": 1000,
     "updateInterval": 0,
-    "formatDuration": false
+    "formatDuration": false,
+    "rollingAverage": 10,
+    "showMax": true
   }
 }
 ```
@@ -111,7 +114,7 @@ Keys are matched against the model's provider id (e.g. `anthropic`, `openai`, `g
 
 Resolution timing per key group:
 
-- **Renderer-side** keys (`display`, `icon`, `thresholds`, `colors`, `updateInterval`) apply as soon as the provider changes.
+- **Renderer-side** keys (`display`, `icon`, `thresholds`, `colors`, `updateInterval`, `rollingAverage`, `showMax`) apply as soon as the provider changes.
 - **Engine-side** keys (`slidingWindow`, `useProviderTokens`, `countStrategy`, `endTpsBehavior`) apply at the next stream start, so the current measurement is never skewed mid-stream.
 
 You can also manage overrides interactively with `/tps overrides` (see [Commands](#commands)).
@@ -140,6 +143,8 @@ Invalid configuration values are automatically corrected to their defaults. A wa
 | `icon`               | string                         | `"⚡"`      | Icon shown before TPS in the status bar                                                           |
 | `updateInterval`     | number                         | `0`         | Status bar update interval in ms (0 = every delta)                                                |
 | `formatDuration`     | boolean                        | `false`     | Show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))       |
+| `rollingAverage`     | number                         | `10`        | Responses in the rolling average, `0` = off (see [Rolling Average & Max](#rolling-average--max))  |
+| `showMax`            | boolean                        | `true`      | Show the session's best response (see [Rolling Average & Max](#rolling-average--max))             |
 | `displayColors`      | object                         | `{}`        | Hex colors for the suffix parts (see [Display Color Customization](#display-color-customization)) |
 | `providerOverrides`  | object                         | `{}`        | Per-provider config overrides (see [Provider Overrides](#provider-overrides))                     |
 
@@ -155,6 +160,8 @@ A small interactive menu is available when running `/tps` in the editor, where y
 - **Sliding window** — time window for TPS calculation (see [Sliding Window](#sliding-window))
 - **End-of-stream TPS** — what to show after streaming ends (`average` or `last`)
 - **Format duration** — show elapsed time in human-readable units (see [Duration Formatting](#duration-formatting))
+- **Rolling average** — how many recent responses to average, or off (see [Rolling Average & Max](#rolling-average--max))
+- **Show max TPS** — show the session's best response (see [Rolling Average & Max](#rolling-average--max))
 - **Thresholds** — customize the TPS threshold values for each tier (see [Threshold Customization](#threshold-customization))
 - **Colors** — customize the hex color for each TPS tier (see [Color Customization](#color-customization))
 - **Display colors** — customize the hex color for the suffix parts (count, elapsed, ttft) (see [Display Color Customization](#display-color-customization))
@@ -231,6 +238,43 @@ After streaming ends, the `endTpsBehavior` option controls what TPS value is dis
 | `last`              | Returns the last sliding window TPS measurement from the moment streaming stopped. Useful for seeing how fast the model was streaming at the end. |
 
 This is also configurable via the `/tps` interactive menu.
+
+### Rolling Average & Max
+
+Besides the live reading, the status bar shows how fast your recent responses were:
+
+```
+⚡ TPS: 41.2 tok/s · avg(10): 38.7 · max: 45.0
+```
+
+- **`avg(N)`** — the mean TPS of the last `rollingAverage` responses. Until that many have completed, the label shows how many are averaged so far (e.g. `avg(3)`).
+- **`max`** — the best response of the session.
+
+Each completed agent run (from your prompt to the end of the agent's turn) contributes one sample: its overall average TPS (total tokens / elapsed time, tool execution excluded), regardless of `endTpsBehavior`. Both values are:
+
+- **colored by speed tier**, using the same thresholds and colors as the live reading
+- **tracked per model** (`provider/model`), so switching models never mixes their speeds
+- **reset when a new session starts**
+
+Nothing is shown until the first response completes, and both values update when each response finishes.
+
+| Option           | Values    | Default | Behavior                                                   |
+| ---------------- | --------- | ------- | ---------------------------------------------------------- |
+| `rollingAverage` | `0`–`100` | `10`    | Number of recent responses averaged; `0` hides the average |
+| `showMax`        | boolean   | `true`  | Show the best response of the session                      |
+
+The `/tps` menu offers `Off`, `5`, `10`, `20` and `50` responses; any whole number up to `100` can be set in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "tokenSpeed": {
+    "rollingAverage": 20,
+    "showMax": false
+  }
+}
+```
+
+Both keys can also be set per provider (see [Provider Overrides](#provider-overrides)).
 
 ### Color Customization
 
@@ -348,6 +392,8 @@ When `formatDuration` is enabled, elapsed time in the stats display is formatted
 
 > **Note:** Set `icon: ""` to hide the icon prefix, rendering just `TPS: 25.0 tok/s`.
 
+The [rolling average and max](#rolling-average--max) are appended after any mode once a response has completed, e.g. `⚡ TPS: 25.0 tok/s (150 tok in 6.0s) · avg(10): 23.4 · max: 31.2`.
+
 ### Example: Minimal status bar
 
 With `icon: ""` and `display: "tps"`, the status bar shows:
@@ -384,14 +430,14 @@ The settings menu is described in detail in [Interactive Menu](#interactive-menu
 
 ## How It Works
 
-1. **Session Start** — Renders the initial status bar entry showing the configured icon followed by `TPS: --`
+1. **Session Start** — Renders the initial status bar entry showing the configured icon followed by `TPS: --`, and clears the rolling average / max history
 2. **Message Start** — When a user message starts, TTFT measurement begins
 3. **First Token & Streaming Start** — The moment the first content block starts (`text_start`, `thinking_start`, or `toolcall_start`), the TTFT is recorded and the streaming engine starts tracking
 4. **Token Update** — Each text, thinking, and tool-call delta is recorded. If `useProviderTokens` is `true` and the provider reports token counts, those are used directly; otherwise the extension's own counter (controlled by `countStrategy`) is used
 5. **Sliding Window** — TPS is calculated using a configurable time window of token timestamps. If all events in the window share the same timestamp (a flush after a stall), the span extends backward to include the gap. When streaming ends, behavior depends on `endTpsBehavior`:
    - `average` (default): returns the overall average TPS for consistency with stats.
    - `last`: returns the last sliding window measurement.
-6. **Agent End** — The authoritative token count (if available) is used to snap the total, ensuring the final average is exact. Streaming is stopped.
+6. **Agent End** — The authoritative token count (if available) is used to snap the total, ensuring the final average is exact. Streaming is stopped, and the run's overall average TPS is recorded for the current model's [rolling average and max](#rolling-average--max).
 
 ## Dependencies
 

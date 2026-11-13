@@ -17,3 +17,9 @@ export const MIN_SLIDING_WINDOW = 100;
  * Maximum sliding window duration (ms) — 30s is the largest practical window
  */
 export const MAX_SLIDING_WINDOW = 30000;
+
+/**
+ * Maximum number of per-response TPS samples kept per model, which also
+ * caps the configurable rolling-average size.
+ */
+export const MAX_ROLLING_AVERAGE = 100;
