@@ -5,6 +5,7 @@ import type {
 import type { SettingsProvider } from "../config/types";
 import { Renderer } from "../ui/renderer";
 import { TokenSpeedEngine } from "./engine";
+import { LiveSampler } from "./live-sampler";
 import type { MessageUpdatePayload } from "./message-handler";
 import { MessageHandlerRegistry } from "./message-handler";
 import {
@@ -20,6 +21,7 @@ import { modelKey, TpsHistory } from "./tps-history";
  */
 export class EventManager {
   private readonly registry: MessageHandlerRegistry;
+  private readonly sampler: LiveSampler;
 
   constructor(
     private readonly engine: TokenSpeedEngine,
@@ -34,6 +36,7 @@ export class EventManager {
     this.registry.register(new DeltaHandler(engine, renderer));
     this.registry.register(new ToolcallDeltaHandler(engine, renderer));
     this.registry.register(new ToolcallEndHandler(engine));
+    this.sampler = new LiveSampler(engine, renderer);
   }
 
   /**
@@ -50,6 +53,7 @@ export class EventManager {
       ctx.ui.notify(message, "warning");
     }
 
+    this.sampler.stop();
     this.engine.initialize();
     this.engine.applyProvider(ctx.model?.provider);
     this.history.reset();
@@ -58,9 +62,10 @@ export class EventManager {
   }
 
   /**
-   * Stops the engine when the session shuts down.
+   * Stops the engine and the live sampler when the session shuts down.
    */
   handleSessionShutdown(): void {
+    this.sampler.stop();
     this.engine.stop();
   }
 
@@ -76,7 +81,8 @@ export class EventManager {
   }
 
   /**
-   * Routes message update events through the handler registry.
+   * Routes message update events through the handler registry, and starts
+   * the live sampler once the prompt is streaming.
    *
    * @param event The message_update event payload.
    * @param ctx The Pi extension context.
@@ -86,16 +92,20 @@ export class EventManager {
     ctx: ExtensionContext,
   ): void {
     this.registry.handle(event, ctx);
+    if (this.engine.isStreaming) this.sampler.start(ctx);
   }
 
   /**
-   * Reconciles the total token count, stops streaming, records the run's
-   * average TPS in the history, and updates the renderer.
+   * Stops sampling, reconciles the total token count, stops streaming,
+   * records the run's average TPS for the session max, and updates the
+   * renderer.
    *
    * @param event The message_end event payload.
    * @param ctx The Pi extension context.
    */
   handleAgentEnd(event: AgentEndEvent, ctx: ExtensionContext): void {
+    this.sampler.stop();
+
     // A run that never started streaming (e.g. a request error) carries
     // the previous run's counters, so it must not produce a sample.
     const streamed = this.engine.isStreaming;

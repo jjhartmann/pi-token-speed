@@ -309,4 +309,65 @@ describe("TokenSpeedEngine", () => {
       expect(resolveSpy).not.toHaveBeenCalled();
     });
   });
+
+  // ── live sampling (rolling average) ───────────────────────────────────
+
+  describe("live sampling", () => {
+    let live: TimeMockedEngine;
+
+    beforeEach(() => {
+      live = new TimeMockedEngine(settings, 10_000);
+      live.initialize();
+      live.start();
+    });
+
+    const tokens = (n: number) => {
+      for (let i = 0; i < n; i++) live.recordDelta("x");
+    };
+
+    it("skips sampling before the first token", () => {
+      live.tick(1000);
+      expect(live.sample()).toBe(false);
+      expect(live.rollingAverage(10)).toBeUndefined();
+    });
+
+    it("samples the sliding-window TPS at the current time", () => {
+      tokens(10);
+      live.tick(1000);
+      expect(live.sample()).toBe(true);
+      expect(live.rollingAverage(10)).toBe(10); // 10 tok / 1s
+
+      // No new tokens: the reading decays as time passes
+      live.tick(1000);
+      live.sample();
+      expect(live.rollingAverage(1)).toBe(5); // 10 tok / 2s
+      expect(live.rollingAverage(10)).toBe(7.5);
+    });
+
+    it("skips sampling while paused for a tool call", () => {
+      tokens(10);
+      live.pause();
+      live.tick(1000);
+      expect(live.sample()).toBe(false);
+      expect(live.rollingAverage(10)).toBeUndefined();
+    });
+
+    it("keeps the samples after streaming stops", () => {
+      tokens(10);
+      live.tick(1000);
+      live.sample();
+      live.stop();
+      expect(live.sample()).toBe(false);
+      expect(live.rollingAverage(10)).toBe(10);
+    });
+
+    it("clears the samples when the next prompt starts", () => {
+      tokens(10);
+      live.tick(1000);
+      live.sample();
+      live.stop();
+      live.start();
+      expect(live.rollingAverage(10)).toBeUndefined();
+    });
+  });
 });
