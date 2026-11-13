@@ -611,10 +611,11 @@ describe("Renderer", () => {
     });
   });
 
-  // ---- history suffix (rolling average / max) ----
+  // ---- rolling average / max suffix ----
 
-  describe("history suffix", () => {
+  describe("rolling average and max suffix", () => {
     const KEY = "local/qwen";
+    const sample = (tps: number) => engine["_samples"].add(tps);
 
     beforeEach(() => {
       ctx = makeContext({ model: { provider: "local", id: "qwen" } as any });
@@ -627,55 +628,60 @@ describe("Renderer", () => {
       return spy.mock.calls.at(-1)![1] as string;
     };
 
-    it("is omitted until a response has been recorded", () => {
+    it("is omitted until a sample or response exists", () => {
       const text = status();
-      expect(text).not.toContain("avg(");
+      expect(text).not.toContain("avg:");
       expect(text).not.toContain("max:");
     });
 
-    it("appends the tier-colored average of the last N responses and the max", () => {
+    it("appends the tier-colored average of the last N live samples and the max", () => {
       configRef.current = makeConfig({ rollingAverage: 2 });
-      for (const tps of [100, 10, 20]) history.record(KEY, tps);
+      for (const tps of [100, 10, 20]) sample(tps);
+      history.record(KEY, 100);
 
       // 40 → medium (#88cc00), 15 → slow (#ffcc00), 100 → blazing (#00ccff)
       expect(status()).toBe(
         "⚡ TPS: \x1b[38;2;136;204;0m40.0 tok/s\x1b[0m\u200b" +
-          " · avg(2): \x1b[38;2;255;204;0m15.0\x1b[0m" +
+          " · avg: \x1b[38;2;255;204;0m15.0\x1b[0m" +
           " · max: \x1b[38;2;0;204;255m100.0\x1b[0m\u200b",
       );
     });
 
-    it("shows the sample count while fewer than N responses exist", () => {
-      history.record(KEY, 30);
-      expect(status()).toContain("avg(1): ");
+    it("updates the average as live samples arrive", () => {
+      sample(30);
+      expect(status()).toContain("30.0");
+      sample(50);
+      expect(status()).toContain("40.0");
     });
 
     it("comes after the stats suffix", () => {
       configRef.current = makeConfig({ display: "stats" });
       engine["_tokenCount"] = 150;
-      history.record(KEY, 30);
-      expect(status()).toMatch(/\(150 tok[^)]*\)\u200b · avg\(1\): /);
+      sample(30);
+      expect(status()).toMatch(/\(150 tok[^)]*\)\u200b · avg: /);
     });
 
     it("hides the average when rollingAverage is 0", () => {
       configRef.current = makeConfig({ rollingAverage: 0 });
+      sample(30);
       history.record(KEY, 30);
       const text = status();
-      expect(text).not.toContain("avg(");
+      expect(text).not.toContain("avg:");
       expect(text).toContain("max: ");
     });
 
     it("hides the max when showMax is off", () => {
       configRef.current = makeConfig({ showMax: false });
+      sample(30);
       history.record(KEY, 30);
       const text = status();
-      expect(text).toContain("avg(1): ");
+      expect(text).toContain("avg: ");
       expect(text).not.toContain("max:");
     });
 
-    it("only uses responses from the current model", () => {
+    it("only shows the max of the current model", () => {
       history.record("anthropic/claude", 90);
-      expect(status()).not.toContain("avg(");
+      expect(status()).not.toContain("max:");
     });
   });
 

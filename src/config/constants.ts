@@ -19,7 +19,12 @@ export const MIN_SLIDING_WINDOW = 100;
 export const MAX_SLIDING_WINDOW = 30000;
 
 /**
- * Maximum number of per-response TPS samples kept per model, which also
- * caps the configurable rolling-average size.
+ * How often (ms) the live TPS is sampled for the rolling average.
+ */
+export const ROLLING_AVERAGE_SAMPLE_MS = 300;
+
+/**
+ * Maximum number of live TPS samples kept for the rolling average, which
+ * also caps the configurable rolling-average size (100 × 300 ms = 30 s).
  */
 export const MAX_ROLLING_AVERAGE = 100;

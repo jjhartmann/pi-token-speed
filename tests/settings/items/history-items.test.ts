@@ -33,14 +33,17 @@ describe("RollingAverageSettingsItem", () => {
     const config = makeDefaults();
     expect(item.format({ ...config, rollingAverage: 0 })).toBe("Off");
     expect(item.format({ ...config, rollingAverage: 10 })).toBe(
-      "Last 10 responses (default)",
+      "10 samples / 3 s (default)",
+    );
+    expect(item.format({ ...config, rollingAverage: 100 })).toBe(
+      "100 samples / 30 s",
     );
     expect(item.format({ ...config, rollingAverage: 7 })).toBe("7");
   });
 
   it("parses a menu label back to a number", () => {
     const config = makeDefaults();
-    expect(item.setConfig(config, "Last 5 responses")).toEqual({
+    expect(item.setConfig(config, "5 samples / 1.5 s")).toEqual({
       valid: true,
       config: { rollingAverage: 5 },
     });

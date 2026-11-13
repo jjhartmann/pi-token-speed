@@ -1,28 +1,35 @@
-import { MAX_ROLLING_AVERAGE } from "../../config/constants";
+import {
+  MAX_ROLLING_AVERAGE,
+  ROLLING_AVERAGE_SAMPLE_MS,
+} from "../../config/constants";
 import type { ValidationCheckResult } from "../base";
 import { ScalarSettingsItem } from "./scalar";
 
 export const ROLLING_AVERAGE_DEFAULT = 10;
 
+/** Menu label for a preset size, e.g. "10 samples / 3 s". */
+const presetLabel = (size: number): string =>
+  `${size} samples / ${(size * ROLLING_AVERAGE_SAMPLE_MS) / 1000} s`;
+
 const ROLLING_AVERAGE_LABELS: Record<number, string> = {
   0: "Off",
-  5: "Last 5 responses",
-  10: "Last 10 responses (default)",
-  20: "Last 20 responses",
-  50: "Last 50 responses",
+  5: presetLabel(5),
+  10: `${presetLabel(10)} (default)`,
+  20: presetLabel(20),
+  50: presetLabel(50),
+  100: presetLabel(100),
 };
 
 /**
- * Numeric setting: how many recent responses the rolling-average TPS
- * covers (0 = hidden).
+ * Numeric setting: how many live TPS samples (one every
+ * `ROLLING_AVERAGE_SAMPLE_MS`) the rolling average covers (0 = hidden).
  */
 export class RollingAverageSettingsItem extends ScalarSettingsItem<number> {
   constructor() {
     super({
       id: "rollingAverage",
       label: "Rolling average",
-      description:
-        "Show the average TPS of the last N responses for the current model (0 = off)",
+      description: `Average of the last N live TPS samples of the active prompt, one every ${ROLLING_AVERAGE_SAMPLE_MS} ms (0 = off)`,
       default: ROLLING_AVERAGE_DEFAULT,
       labels: ROLLING_AVERAGE_LABELS,
       max: MAX_ROLLING_AVERAGE,

@@ -1,3 +1,4 @@
+import { MAX_ROLLING_AVERAGE } from "../config/constants";
 import type { SettingsProvider, TokenSpeedConfig } from "../config/types";
 import {
   COUNT_STRATEGY_DEFAULT,
@@ -9,6 +10,7 @@ import {
 } from "../settings/items/end-tps-behavior";
 import { SLIDING_WINDOW_DEFAULT } from "../settings/items/sliding-window";
 import { USE_PROVIDER_TOKENS_DEFAULT } from "../settings/items/use-provider-tokens";
+import { RollingSamples } from "./rolling-samples";
 import { SlidingWindow } from "./sliding-window";
 
 const TOKEN_REGEX = /\w+|[^\s\w]/g;
@@ -29,6 +31,9 @@ export class TokenSpeedEngine {
 
   private _tps = 0;
   private _countedUsageOutput = 0;
+
+  /** Live TPS samples of the active prompt, for the rolling average. */
+  private readonly _samples = new RollingSamples(MAX_ROLLING_AVERAGE);
 
   private _slidingWindow: SlidingWindow;
   private _useProviderTokens = USE_PROVIDER_TOKENS_DEFAULT;
@@ -182,6 +187,34 @@ export class TokenSpeedEngine {
   }
 
   /**
+   * Takes one live sample for the rolling average: the sliding-window TPS
+   * at this moment, so stalls pull the average down as they happen.
+   *
+   * Skipped when not streaming, while paused (tool execution), and before
+   * the first token of the prompt, so idle time never counts as 0 tok/s.
+   *
+   * @returns Whether a sample was taken.
+   */
+  sample(): boolean {
+    if (!this._isStreaming || this._isPaused || this._tokenCount === 0) {
+      return false;
+    }
+    this._samples.add(this._slidingWindow.getTps(this.now()));
+    return true;
+  }
+
+  /**
+   * Mean of the newest `size` live samples of the current (or last) prompt.
+   * Samples are kept after streaming stops and cleared at the next start.
+   *
+   * @param size How many recent samples to average (≤ 0 = disabled).
+   * @returns The mean TPS, or undefined when disabled or nothing sampled.
+   */
+  rollingAverage(size: number): number | undefined {
+    return this._samples.average(size);
+  }
+
+  /**
    * Returns time to first token in milliseconds
    */
   get ttft(): number {
@@ -199,6 +232,7 @@ export class TokenSpeedEngine {
     this._startTime = this.now();
     this._endTime = this.now();
     this._slidingWindow.reset();
+    this._samples.reset();
     this._countedUsageOutput = 0;
     this._tps = 0;
     this._pausedMs = 0;
@@ -256,7 +290,7 @@ export class TokenSpeedEngine {
     if (!this._isStreaming || tokens <= 0) return;
 
     this._tokenCount += tokens;
-    this._slidingWindow.record(tokens);
+    this._slidingWindow.record(tokens, this.now());
     this._tps = this._slidingWindow.getTps(this.now());
   }
 

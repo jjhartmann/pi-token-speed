@@ -14,13 +14,14 @@ export class SlidingWindow {
   constructor(private readonly windowMs: number) {}
 
   /**
-   * Records a batch of tokens with the current timestamp.
+   * Records a batch of tokens with a timestamp (defaults to now).
    * Compacts old events when the index reaches the compaction threshold.
    *
    * @param tokens The number of tokens to record.
+   * @param time Timestamp in milliseconds (defaults to `Date.now()`).
    */
-  record(tokens: number): void {
-    this.events.push({ time: Date.now(), tokens });
+  record(tokens: number, time = Date.now()): void {
+    this.events.push({ time, tokens });
 
     if (this.windowStartIndex >= COMPACTION_THRESHOLD) {
       this.compact();

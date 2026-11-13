@@ -28,7 +28,7 @@ export class Renderer {
 
   /**
    * Creates a new Renderer bound to an engine, settings provider, and
-   * per-response TPS history.
+   * session TPS history (for the max).
    */
   constructor(
     private readonly engine: TokenSpeedEngine,
@@ -84,8 +84,8 @@ export class Renderer {
       displayColors: config.displayColors,
     });
 
-    // Append the session history (rolling average / max)
-    const history = this.buildHistorySuffix(
+    // Append the live rolling average and session max
+    const averageMax = this.buildAverageMaxSuffix(
       config,
       theme,
       modelKey(ctx.model),
@@ -93,23 +93,23 @@ export class Renderer {
 
     const icon = config.icon ? `${config.icon} ` : "";
     const prefix = theme.fg("dim", `${icon}TPS:`);
-    const text = `${prefix} ${displayValue}${suffix}${history}`;
+    const text = `${prefix} ${displayValue}${suffix}${averageMax}`;
 
     ctx.ui.setStatus(STATUS_KEY, text);
   }
 
   /**
-   * Builds the session-history suffix: rolling average of recent
-   * responses and best response, each colored by its TPS tier.
+   * Builds the suffix with the live rolling average of the active prompt
+   * and the session's best response, each colored by its TPS tier.
    *
-   * Example: ` · avg(10): 38.7 · max: 45.0`
+   * Example: ` · avg: 38.7 · max: 45.0`
    *
    * @param config The resolved configuration.
    * @param theme The active theme (labels are dimmed like "TPS:").
-   * @param key The current model's history key.
-   * @returns The suffix, or "" when disabled or nothing is recorded yet.
+   * @param key The current model's history key (for the max).
+   * @returns The suffix, or "" when disabled or nothing to show yet.
    */
-  private buildHistorySuffix(
+  private buildAverageMaxSuffix(
     config: TokenSpeedConfig,
     theme: Theme,
     key: string,
@@ -121,14 +121,14 @@ export class Renderer {
         this.getColor(config, tps),
       )}`;
 
-    const avg = this.history.average(key, config.rollingAverage);
-    if (avg) parts.push(formatPart(`avg(${avg.count}):`, avg.value));
+    const avg = this.engine.rollingAverage(config.rollingAverage);
+    if (avg !== undefined) parts.push(formatPart("avg:", avg));
 
     const max = config.showMax ? this.history.max(key) : undefined;
     if (max !== undefined) parts.push(formatPart("max:", max));
 
     if (parts.length === 0) return "";
-    return ` · ${parts.join(" · ")}​`;
+    return ` · ${parts.join(" · ")}\u200b`;
   }
 
   /**
